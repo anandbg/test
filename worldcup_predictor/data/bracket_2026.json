@@ -1,0 +1,43 @@
+{
+  "_comment": "2026 FIFA World Cup knockout structure. Cross-verified vs Wikipedia/FIFA/ESPN/NBC/Sky. Slots: {w:group}=winner, {r:group}=runner-up, {t:[groups]}=best-third pool (FIFA combination table picks one per slot to avoid rematches; we resolve via constrained matching). R16+ reference winners (W) / losers (L) of earlier match ids.",
+  "r32": [
+    {"id": 73, "a": {"r": "A"}, "b": {"r": "B"}},
+    {"id": 74, "a": {"w": "E"}, "b": {"t": ["A", "B", "C", "D", "F"]}},
+    {"id": 75, "a": {"w": "F"}, "b": {"r": "C"}},
+    {"id": 76, "a": {"w": "C"}, "b": {"r": "F"}},
+    {"id": 77, "a": {"w": "I"}, "b": {"t": ["C", "D", "F", "G", "H"]}},
+    {"id": 78, "a": {"r": "E"}, "b": {"r": "I"}},
+    {"id": 79, "a": {"w": "A"}, "b": {"t": ["C", "E", "F", "H", "I"]}},
+    {"id": 80, "a": {"w": "L"}, "b": {"t": ["E", "H", "I", "J", "K"]}},
+    {"id": 81, "a": {"w": "D"}, "b": {"t": ["B", "E", "F", "I", "J"]}},
+    {"id": 82, "a": {"w": "G"}, "b": {"t": ["A", "E", "H", "I", "J"]}},
+    {"id": 83, "a": {"r": "K"}, "b": {"r": "L"}},
+    {"id": 84, "a": {"w": "H"}, "b": {"r": "J"}},
+    {"id": 85, "a": {"w": "B"}, "b": {"t": ["E", "F", "G", "I", "J"]}},
+    {"id": 86, "a": {"w": "J"}, "b": {"r": "H"}},
+    {"id": 87, "a": {"w": "K"}, "b": {"t": ["D", "E", "I", "J", "L"]}},
+    {"id": 88, "a": {"r": "D"}, "b": {"r": "G"}}
+  ],
+  "r16": [
+    {"id": 89, "a": "W74", "b": "W77"},
+    {"id": 90, "a": "W73", "b": "W75"},
+    {"id": 91, "a": "W76", "b": "W78"},
+    {"id": 92, "a": "W79", "b": "W80"},
+    {"id": 93, "a": "W83", "b": "W84"},
+    {"id": 94, "a": "W81", "b": "W82"},
+    {"id": 95, "a": "W86", "b": "W88"},
+    {"id": 96, "a": "W85", "b": "W87"}
+  ],
+  "qf": [
+    {"id": 97, "a": "W89", "b": "W90"},
+    {"id": 98, "a": "W93", "b": "W94"},
+    {"id": 99, "a": "W91", "b": "W92"},
+    {"id": 100, "a": "W95", "b": "W96"}
+  ],
+  "sf": [
+    {"id": 101, "a": "W97", "b": "W98"},
+    {"id": 102, "a": "W99", "b": "W100"}
+  ],
+  "final": {"id": 104, "a": "W101", "b": "W102"},
+  "third_place": {"id": 103, "a": "L101", "b": "L102"}
+}

@@ -62,7 +62,28 @@ python -m worldcup_predictor predict --home Brazil --away Croatia --neutral
 # Show the Elo table / run the sample back-test
 python -m worldcup_predictor ratings
 python -m worldcup_predictor backtest
+
+# Generate the full 2026 World Cup predictions report (every match + title odds)
+python -m worldcup_predictor report --output PREDICTIONS.md --sims 20000
 ```
+
+## Full 2026 World Cup predictions
+
+[`PREDICTIONS.md`](PREDICTIONS.md) contains predictions for **every** 2026 World
+Cup match plus title/advancement probabilities for all 48 teams. It is generated
+by predicting all 72 group-stage games with the engine and running a **20,000-run
+Monte-Carlo** of the complete bracket (the verified group draw + knockout
+structure, including the 8-best-third-place rule).
+
+```bash
+python -m worldcup_predictor report          # regenerate PREDICTIONS.md
+```
+
+The group draw (`data/groups_2026.json`), knockout bracket
+(`data/bracket_2026.json`) and team ratings (`data/elo_ratings_2026.json`) are
+bundled and easy to refresh. Because per-match odds for 104 fixtures aren't
+practical to collect, the tournament report runs **model-only** (Elo/Poisson);
+pass `--odds` to `predict` for the market-anchored ensemble on individual games.
 
 Example output:
 
@@ -120,8 +141,10 @@ elo = EloModel(home_advantage=100).fit(historical_matches)  # chronological dict
 | `metrics.py` | Brier, **RPS**, log-loss (proper scoring rules) |
 | `engine.py` | Orchestration → a `Prediction` object |
 | `backtest.py` | Score market vs model vs ensemble on historical data |
-| `datasets.py` | Load ratings & results/odds CSVs |
-| `data/` | Seed Elo ratings + sample WC-2022 matches |
+| `tournament.py` | Predict-all + Monte-Carlo bracket simulation (title/advance odds) |
+| `report.py` | Generate `PREDICTIONS.md` for the full 2026 World Cup |
+| `datasets.py` | Load ratings, results/odds CSVs, WC2026 groups & bracket |
+| `data/` | Seed Elo ratings, WC-2022 sample, WC-2026 groups/bracket/ratings |
 
 ## Back-testing on real data
 

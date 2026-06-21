@@ -77,6 +77,13 @@ def cmd_backtest(args) -> int:
     return 0
 
 
+def cmd_report(args) -> int:
+    from .report import generate
+    path = generate(args.output, n_sims=args.sims)
+    print(f"wrote {path} ({args.sims} simulations)")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="worldcup_predictor",
@@ -111,6 +118,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     pb = sub.add_parser("backtest", help="run the sample back-test")
     pb.set_defaults(func=cmd_backtest)
+
+    prep = sub.add_parser("report", help="generate the full WC2026 PREDICTIONS.md report")
+    prep.add_argument("--output", default="PREDICTIONS.md", help="output path")
+    prep.add_argument("--sims", type=int, default=20000, help="Monte-Carlo runs")
+    prep.set_defaults(func=cmd_report)
 
     return p
 

@@ -132,6 +132,7 @@ class PredictionEngine:
         rho: float = -0.13,
         mu_total: float = 2.6,
         elo_to_supremacy: float = 1.0 / 350.0,
+        mismatch_goal_factor: float = 0.12,
         max_goals: int = 10,
     ) -> None:
         if not 0.0 <= market_weight <= 1.0:
@@ -142,16 +143,23 @@ class PredictionEngine:
         self.rho = rho
         self.mu_total = mu_total
         self.elo_to_supremacy = elo_to_supremacy
+        self.mismatch_goal_factor = mismatch_goal_factor
         self.max_goals = max_goals
 
     # -- expected goals from Elo ---------------------------------------------
     def _lambdas(self, rating_diff: float) -> Tuple[float, float]:
-        """Split baseline total goals by Elo supremacy into (home, away) lambdas."""
+        """Split expected total goals by Elo supremacy into (home, away) lambdas.
+
+        Total goals rise modestly with the mismatch: a strong side runs up the
+        score more than the underdog suppresses it, so a lopsided game averages
+        slightly more goals than an even one.
+        """
         supremacy = self.elo_to_supremacy * rating_diff
+        mu = self.mu_total + self.mismatch_goal_factor * abs(supremacy)
         # keep supremacy within the achievable range of the total
-        supremacy = max(-self.mu_total + 0.3, min(self.mu_total - 0.3, supremacy))
-        lam_home = max(0.15, (self.mu_total + supremacy) / 2.0)
-        lam_away = max(0.15, (self.mu_total - supremacy) / 2.0)
+        supremacy = max(-mu + 0.3, min(mu - 0.3, supremacy))
+        lam_home = max(0.15, (mu + supremacy) / 2.0)
+        lam_away = max(0.15, (mu - supremacy) / 2.0)
         return lam_home, lam_away
 
     # -- main entry point -----------------------------------------------------

@@ -176,3 +176,182 @@ def _simulate_group(
 
 def _third_place_score(table_entry: dict, rating: float):
     return (table_entry["pts"], table_entry["gd"], table_entry["gf"], rating)
+
+
+# ---------------------------------------------------------------------------
+# Third-place allocation (constrained bipartite matching)
+# ---------------------------------------------------------------------------
+
+
+def assign_thirds(qualifying_groups, third_slots) -> Optional[Dict[int, str]]:
+    """Assign the 8 qualifying third-place groups to the 8 winner-vs-third R32
+    slots, respecting each slot's allowed-group pool.
+
+    ``third_slots`` is a list of ``(match_id, set_of_allowed_groups)``. Returns
+    ``{match_id: group}`` or ``None`` if no perfect matching exists.
+
+    FIFA's Annex C table is the official mapping (designed to avoid rematches);
+    any perfect matching satisfies the structural pool constraints, which is
+    sufficient for unbiased Monte-Carlo bracket estimates.
+    """
+    groups = list(qualifying_groups)
+    # order slots by fewest options first (constraint propagation)
+    slots = sorted(third_slots, key=lambda s: len(s[1] & qualifying_groups))
+    assignment: Dict[int, str] = {}
+    used = set()
+
+    def backtrack(k: int) -> bool:
+        if k == len(slots):
+            return True
+        mid, pool = slots[k]
+        for g in groups:
+            if g in pool and g not in used:
+                assignment[mid] = g
+                used.add(g)
+                if backtrack(k + 1):
+                    return True
+                used.discard(g)
+                del assignment[mid]
+        return False
+
+    return assignment if backtrack(0) else None
+
+
+def _resolve_slot(slot, winners, runners, third_by_group, third_assignment, match_id):
+    """Resolve an R32 slot spec to a concrete team."""
+    if "w" in slot:
+        return winners[slot["w"]]
+    if "r" in slot:
+        return runners[slot["r"]]
+    if "t" in slot:
+        g = third_assignment.get(match_id)
+        return third_by_group.get(g) if g is not None else None
+    raise ValueError(f"bad slot spec: {slot}")
+
+
+# ---------------------------------------------------------------------------
+# Full-tournament Monte-Carlo
+# ---------------------------------------------------------------------------
+
+_STAGES = ("reach_r32", "reach_r16", "reach_qf", "reach_sf", "reach_final", "champion")
+
+
+def simulate_tournament(
+    engine: PredictionEngine,
+    groups_data: dict,
+    bracket: dict,
+    n_sims: int = 20000,
+    seed: int = 12345,
+):
+    """Monte-Carlo the whole tournament; return per-team stage probabilities
+    and per-group winner/runner/advance probabilities.
+    """
+    groups = groups_data["groups"]
+    hosts = set(groups_data.get("hosts", []))
+    rng = random.Random(seed)
+    cache = _MatchCache(engine, hosts)
+
+    teams = [t for g in groups.values() for t in g]
+    stage = {t: {s: 0 for s in _STAGES} for t in teams}
+    group_stat = {
+        g: {t: {"win": 0, "runner": 0, "advance": 0} for t in gteams}
+        for g, gteams in groups.items()
+    }
+
+    third_slots = [
+        (m["id"], set(m["b"]["t"]))
+        for m in bracket["r32"]
+        if "t" in m["b"]
+    ]
+
+    # later-round matches reference earlier results as "W##" / "L##"
+    later_rounds = bracket["r16"] + bracket["qf"] + bracket["sf"] + [bracket["final"]]
+
+    for _ in range(n_sims):
+        winners: Dict[str, str] = {}
+        runners: Dict[str, str] = {}
+        thirds = []  # (group, team, score)
+
+        for g, gteams in groups.items():
+            ranked, table = _simulate_group(gteams, cache, hosts, rng, engine)
+            winners[g], runners[g] = ranked[0], ranked[1]
+            group_stat[g][ranked[0]]["win"] += 1
+            group_stat[g][ranked[0]]["advance"] += 1
+            group_stat[g][ranked[1]]["runner"] += 1
+            group_stat[g][ranked[1]]["advance"] += 1
+            third = ranked[2]
+            thirds.append(
+                (g, third, _third_place_score(table[third], engine.elo.rating(third)))
+            )
+
+        thirds.sort(key=lambda x: x[2], reverse=True)
+        qual = thirds[:8]
+        qual_groups = {g for g, _, _ in qual}
+        third_by_group = {g: t for g, t, _ in qual}
+        for g, t, _ in qual:
+            group_stat[g][t]["advance"] += 1
+
+        assignment = assign_thirds(qual_groups, third_slots) or {}
+
+        # --- seed and play the Round of 32 -------------------------------
+        win_of: Dict[int, str] = {}
+        lose_of: Dict[int, str] = {}
+        for m in bracket["r32"]:
+            a = _resolve_slot(m["a"], winners, runners, third_by_group, assignment, m["id"])
+            b = _resolve_slot(m["b"], winners, runners, third_by_group, assignment, m["id"])
+            if a is None or b is None:  # assignment fell through (rare); skip safely
+                continue
+            stage[a]["reach_r32"] += 1
+            stage[b]["reach_r32"] += 1
+            w, l = _play(a, b, cache, rng)
+            win_of[m["id"]], lose_of[m["id"]] = w, l
+            stage[w]["reach_r16"] += 1
+
+        # --- remaining rounds -------------------------------------------
+        # map a match id to the stage credited to its winner
+        def winner_stage(mid: int) -> Optional[str]:
+            if 89 <= mid <= 96:
+                return "reach_qf"
+            if 97 <= mid <= 100:
+                return "reach_sf"
+            if 101 <= mid <= 102:
+                return "reach_final"
+            if mid == 104:
+                return "champion"
+            return None
+
+        for m in later_rounds:
+            a = _ref(m["a"], win_of, lose_of)
+            b = _ref(m["b"], win_of, lose_of)
+            if a is None or b is None:
+                continue
+            w, l = _play(a, b, cache, rng)
+            win_of[m["id"]], lose_of[m["id"]] = w, l
+            st = winner_stage(m["id"])
+            if st:
+                stage[w][st] += 1
+
+    # normalize to probabilities
+    def norm(d):
+        return {k: v / n_sims for k, v in d.items()}
+
+    team_probs = {t: norm(stage[t]) for t in teams}
+    group_probs = {
+        g: {t: {k: v / n_sims for k, v in group_stat[g][t].items()} for t in group_stat[g]}
+        for g in groups
+    }
+    return {"n_sims": n_sims, "teams": team_probs, "groups": group_probs}
+
+
+def _play(a: str, b: str, cache: _MatchCache, rng: random.Random):
+    """Sample a knockout winner; return (winner, loser)."""
+    p_a = cache.advance_prob(a, b)
+    if rng.random() < p_a:
+        return a, b
+    return b, a
+
+
+def _ref(ref: str, win_of, lose_of):
+    """Resolve a 'W##' / 'L##' reference to a team."""
+    kind, mid = ref[0], int(ref[1:])
+    return win_of.get(mid) if kind == "W" else lose_of.get(mid)

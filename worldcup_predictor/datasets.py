@@ -21,6 +21,9 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(_HERE, "data")
 SEED_RATINGS = os.path.join(DATA_DIR, "elo_ratings.json")
 SAMPLE_MATCHES = os.path.join(DATA_DIR, "sample_matches.csv")
+RATINGS_2026 = os.path.join(DATA_DIR, "elo_ratings_2026.json")
+GROUPS_2026 = os.path.join(DATA_DIR, "groups_2026.json")
+BRACKET_2026 = os.path.join(DATA_DIR, "bracket_2026.json")
 
 
 def load_seed_ratings(path: str = SEED_RATINGS) -> Dict[str, float]:
@@ -33,6 +36,18 @@ def load_seed_ratings(path: str = SEED_RATINGS) -> Dict[str, float]:
 def load_elo(path: str = SEED_RATINGS, home_advantage: float = 100.0) -> EloModel:
     """Build an EloModel from a ratings JSON file."""
     return EloModel(ratings=load_seed_ratings(path), home_advantage=home_advantage)
+
+
+def load_groups_2026(path: str = GROUPS_2026) -> dict:
+    """Load the WC2026 group draw: {'hosts': [...], 'groups': {'A': [...], ...}}."""
+    with open(path, "r", encoding="utf-8") as fh:
+        return json.load(fh)
+
+
+def load_bracket_2026(path: str = BRACKET_2026) -> dict:
+    """Load the WC2026 knockout bracket structure."""
+    with open(path, "r", encoding="utf-8") as fh:
+        return json.load(fh)
 
 
 def _result_index(home_goals: int, away_goals: int) -> int:
