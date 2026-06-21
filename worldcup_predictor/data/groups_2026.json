@@ -1,0 +1,18 @@
+{
+  "_comment": "2026 FIFA World Cup final group draw (held 5 Dec 2025; playoff winners resolved Mar 2026). Cross-verified across Wikipedia, ESPN, Sky Sports, FOX, NBC. Team[0] is the pot-1 seed / host (slot 1). Hosts: Mexico (A), Canada (B), USA (D).",
+  "hosts": ["Mexico", "Canada", "United States"],
+  "groups": {
+    "A": ["Mexico", "South Africa", "South Korea", "Czechia"],
+    "B": ["Canada", "Switzerland", "Qatar", "Bosnia and Herzegovina"],
+    "C": ["Brazil", "Morocco", "Scotland", "Haiti"],
+    "D": ["United States", "Paraguay", "Australia", "Turkey"],
+    "E": ["Germany", "Curacao", "Ivory Coast", "Ecuador"],
+    "F": ["Netherlands", "Japan", "Tunisia", "Sweden"],
+    "G": ["Belgium", "Egypt", "Iran", "New Zealand"],
+    "H": ["Spain", "Cape Verde", "Saudi Arabia", "Uruguay"],
+    "I": ["France", "Senegal", "Norway", "Iraq"],
+    "J": ["Argentina", "Algeria", "Austria", "Jordan"],
+    "K": ["Portugal", "Colombia", "Uzbekistan", "DR Congo"],
+    "L": ["England", "Croatia", "Ghana", "Panama"]
+  }
+}
