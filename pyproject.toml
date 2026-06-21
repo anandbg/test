@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "worldcup-predictor"
+version = "0.1.0"
+description = "Market-anchored ensemble engine for predicting World Cup football match outcomes"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+keywords = ["football", "soccer", "world-cup", "prediction", "elo", "poisson", "betting-odds"]
+dependencies = []
+
+[project.scripts]
+worldcup-predictor = "worldcup_predictor.cli:main"
+
+[tool.setuptools]
+packages = ["worldcup_predictor"]
+
+[tool.setuptools.package-data]
+worldcup_predictor = ["data/*.json", "data/*.csv"]
