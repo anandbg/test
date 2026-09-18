@@ -36,6 +36,7 @@ Each keyword is searched separately, so the same item appears once per keyword i
 | `column_map` | Source header to canonical field, with aliases | `source_header`, `file_type`, `canonical_field`, `first_seen_run`, `notes` |
 | `ingest_log` | Audit of every load attempt | `ingest_id`, `source_file_id`, `started_at`, `finished_at`, `rows_in`, `rows_loaded`, `rows_rejected`, `status`, `message` |
 | `schema_version` | Migration tracking | `version`, `applied_at`, `script_name` |
+| `label_lookup` | Sensitivity label GUID to display name | `label_guid`, `label_name`, `label_priority`, `sourced_from`, `refreshed_at` |
 
 **Keywords and taxonomy**
 
@@ -50,8 +51,8 @@ Each keyword is searched separately, so the same item appears once per keyword i
 
 | Table | Purpose | Key columns |
 |---|---|---|
-| `location` | Canonical container | `location_id`, `location_key` (hash), `workload`, `site_url`, `site_title`, `library_name`, `folder_path`, `folder_depth`, `mailbox_upn`, `mailbox_type`, `team_name`, `channel_name`, `owner_upn`, `repo_class`, `is_known_itar_repo`, `external_sharing_flag` |
-| `item` | One canonical item instance | `item_id`, `item_key` (hash), `content_group_id`, `location_id`, `workload`, `source_item_id`, `family_id`, `conversation_id`, `file_name`, `file_extension`, `title_or_subject`, `author`, `created_utc`, `sent_utc`, `modified_utc`, `size_bytes`, `word_count`, `extracted_text_len`, `sensitivity_label`, `retention_label`, `has_attachments`, `index_status`, `is_encrypted`, `is_unsupported`, `version_id`, `first_seen_run`, `last_seen_run` |
+| `location` | Canonical container | `location_id`, `location_key` (hash), `workload`, `location_subtype` (PrimaryMailbox / ArchiveMailbox / SystemMailbox / OneDriveSite / TeamSite / PrivateChannelSite), `site_url`, `site_title`, `library_name`, `folder_path`, `folder_depth`, `mailbox_upn`, `mailbox_type`, `team_name`, `channel_name`, `channel_type` (standard/private/shared), `parent_team_site_url`, `owner_upn`, `repo_class`, `is_known_itar_repo`, `external_sharing_flag` |
+| `item` | One canonical item instance | `item_id`, `item_key` (hash), `key_method`, `key_confidence`, `content_group_id`, `doc_group_id` (all versions of one document), `is_current_version`, `location_id`, `workload`, `source_item_id`, `family_id`, `conversation_id`, `file_name`, `file_extension`, `title_or_subject`, `author`, `created_utc`, `sent_utc`, `modified_utc`, `size_bytes`, `word_count`, `extracted_text_len`, `sensitivity_label_guid`, `sensitivity_label_name`, `retention_label`, `has_attachments`, `index_status`, `is_encrypted`, `is_unsupported`, `is_list_item`, `version_id`, `first_seen_run`, `last_seen_run` |
 | `item_participant` | People, one row each, not a comma blob | `item_id`, `role` (author/sender/to/cc/bcc/modifier/participant), `party_address`, `party_display`, `party_domain`, `is_internal` |
 | `item_keyword_hit` | The evidence link table | `item_id`, `keyword_id`, `search_run_id`, `source_file_id`, `raw_row_id`, `matched_field_hint`, `first_seen_at` (PK: item, keyword, run) |
 | `location_stats` | Counts straight from the Locations CSV | `search_run_id`, `keyword_id`, `location_id`, `item_count`, `total_size_bytes`, `partially_indexed_count` |
@@ -82,7 +83,9 @@ This distinction matters and is easy to get wrong:
 - **`item_key`** identifies *one copy in one place*. Two copies of the same drawing in two sites are two items, because both sites may need isolating.
 - **`content_group_id`** identifies *the same content wherever it lives*. It answers "how far has this spread" and "is this a widely circulated policy PDF rather than a controlled drawing".
 
-Both are needed. Collapsing them would destroy the site-level answer the exercise is for.
+- **`doc_group_id`** identifies *all versions of one SharePoint or OneDrive document*. Microsoft's own documentation confirms that document versions are not counted in search estimates but **are** returned on export. A library with versioning switched on will therefore look far busier than one without it, purely as an artefact. Versions collapse to one document for ranking, and the version count is carried as a separate column.
+
+All three are needed. Collapsing them would destroy the site-level answer the exercise is for.
 
 ---
 
@@ -113,7 +116,9 @@ Tried in order, first available wins, and the method used is recorded in `item.k
 3. Exchange and Teams: internet message ID plus mailbox UPN.
 4. Fallback: hash of workload, location key, file name, size and created date. Items resolved by fallback are flagged `key_confidence = low` and listed in the data-quality report.
 
-`content_group_id` uses internet message ID for mail, and a hash of file name, size and created date for documents.
+`content_group_id` uses internet message ID for mail, and a hash of file name, size and created date for documents. `doc_group_id` uses the document link with version parameters stripped, so every version of a drawing rolls up to one document.
+
+**SharePoint list trap.** If the *name* of a SharePoint list matches a search term, Purview counts every item in that list as a hit, but exports the whole list as a single CSV. A site holding a list called something like "Export Control Register" will therefore show thousands of hits that are really one object. Items resolved as list items are flagged `is_list_item` and counted once at location level, with the raw count kept as context.
 
 ### 2.3 Keyword attribution
 
@@ -240,7 +245,8 @@ Every row in every report carries: search run, keyword, source CSV file name, or
 
 ### 5.2 Validation checks, run automatically after each load
 
-- **Reconciliation**: items loaded per run equals the Summary CSV count; items per location equals the Locations CSV count.
+- **Reconciliation, tolerance based**: Microsoft states that estimated and actual result counts legitimately differ, because the search is re-run at export, versions and unindexed items are added, and lists collapse. So the check is not equality. It flags a variance outside an agreed band and records the expected reasons (version expansion, list collapse, unindexed inclusion, content changed between estimate and export) so a real load failure is not hidden inside normal drift.
+- **Location row expansion**: one SMTP address can produce several Locations CSV rows, one per mailbox subtype (primary, archive, system). These must stay as separate locations and must not be summed into one mailbox figure without saying so.
 - **Orphans**: no hit without an item, no item without a location.
 - **Key collisions**: no two different source identifiers resolving to one `item_key`.
 - **Key confidence**: count and list of items resolved by the fallback hash.
@@ -265,23 +271,93 @@ Every row in every report carries: search run, keyword, source CSV file name, or
 
 ---
 
-## 7. Limitations and open questions
+## 7. Checked against Microsoft's documentation
+
+The design above was reviewed against Microsoft Learn before being finalised. Five points changed as a result. Each one would have distorted the site ranking if left as first drafted.
+
+### 7.1 Many metadata fields are empty on a direct export from search
+
+Microsoft's metadata field reference marks which fields populate for a **direct export from search** and which only populate once items are **added to a review set and analytics has run**. Duplicate detection, near-duplicate grouping, email threading and several family fields fall in the second group.
+
+**Consequence.** If Leonardo is exporting straight from search, the duplicate and family columns will largely be blank, and any design leaning on them fails silently.
+
+**What changed.** Deduplication no longer depends on Purview's duplicate fields. The database derives its own `content_group_id` and `doc_group_id`, and records `key_method` and `key_confidence` for every item so the weaker derivations are visible. Recommended operating model: keep direct export for broad sweeps, and add only the high-scoring locations to a review set with analytics enabled, where the richer fields become available.
+
+### 7.2 The partially indexed blind spot is worse than stated, and it sits exactly where ITAR data lives
+
+Microsoft states that statistics on partially indexed items **do not include SharePoint sites or OneDrive accounts**, and that unindexed items are only exported from locations that already produced a match. Common causes are unsupported file types, encrypted or password-protected files, and oversized attachments.
+
+**Consequence.** CAD files, scanned drawings, large technical data packages and password-protected archives, which is precisely the ITAR technical data population, are the least likely content to appear in any keyword result, and a site containing nothing but those files can return a clean sheet.
+
+**What changed.** This is promoted from a footnote to a headline limitation, and it now carries an action: adding data sources to an eDiscovery (Premium) case triggers advanced indexing, which reindexes content that failed first time. A separate, non-keyword sweep by file extension and location is needed to cover what keyword search structurally cannot reach.
+
+### 7.3 Teams multiplies the same message across many mailboxes
+
+Microsoft's Teams eDiscovery guidance sets out where each kind of message lands:
+
+- Standard channel messages are journaled to the **team's group mailbox**.
+- Private channel messages place a compliance copy in the mailbox of **every private channel member**.
+- Shared channel messages go to a **system mailbox** of the parent team, searchable only through the parent team.
+- Private and shared channels each have **their own SharePoint site**, separate from the parent team site.
+
+**Consequence.** One sensitive private-channel message about an ITAR programme appears as twenty hits across twenty mailboxes. Ranked naively, twenty innocent mailboxes rise to the top and the actual channel is missed. Equally, isolating a team's main site leaves its private channel sites untouched.
+
+**What changed.** `location` now carries `location_subtype`, `channel_type` and `parent_team_site_url`. Compliance copies collapse to one message by `content_group_id` for ranking, with the spread shown as a separate column. Private and shared channel sites are surfaced as their own locations in the site report, linked to the parent team.
+
+### 7.4 SharePoint versions and list names inflate counts
+
+Versions are excluded from estimates but included in exports, and a matching list *name* counts every item in that list. Both inflate a site's apparent hit count without any extra risk.
+
+**What changed.** `doc_group_id` collapses versions, `is_list_item` isolates the list artefact, and both raw and collapsed counts appear side by side so nobody has to trust an adjustment they cannot see.
+
+### 7.5 Count reconciliation cannot be an equality check
+
+Microsoft documents several legitimate reasons estimated and actual counts differ. A strict equality check would fire constantly and be switched off, which is how real load failures get missed.
+
+**What changed.** Reconciliation is now tolerance based, with the known causes recorded against each variance.
+
+**One thing the research confirmed rather than changed.** The Locations CSV gives a matched-item count per location but no total item count for that location, which is why the density denominator remains an open question rather than an oversight.
+
+---
+
+## 8. Limitations and open questions
 
 ### Limitations to state in every output
 
 - Metadata cannot confirm that an item is ITAR-controlled. Only authorised business owners and Trade Compliance can.
-- **Absence of hits is not absence of risk.** Partially indexed, encrypted, oversized and unsupported items never match any keyword, and ITAR technical data frequently contains no export-control wording at all. Drawings, CAD files and scanned documents are the most likely blind spot.
-- Purview search scope defines the ceiling of what can be found. Locations excluded from the search cannot appear in the results.
+- **Absence of hits is not absence of risk, and this is the single biggest weakness of the exercise.** Partially indexed, encrypted, oversized and unsupported items never match any keyword. SharePoint and OneDrive partially indexed items are not even counted in the statistics. ITAR technical data also frequently contains no export-control wording at all.
+- Keyword search reaches text. It does not reach drawings, scans, CAD geometry or the contents of protected archives.
+- Purview search scope sets the ceiling. Locations excluded from the search cannot appear in the results.
+- Counts are approximate by design, for the reasons in section 7.5.
 - No remediation, labelling, access change or deletion should follow from this analysis alone.
 
 ### Open questions
 
-1. **Density denominator.** Purview gives matched item counts, not total items per library or mailbox. Without a denominator, density is relative only. Can a separate SharePoint or Graph usage report supply library item counts, or should the first version rank on peak, diversity and breadth alone?
-2. **Sample export.** A real Items, Locations, Summary and Settings CSV set from the completed "International Traffic in Arms Regulations" search would let the column mapping be built from fact rather than assumption.
-3. **Reference list authorisation.** Is there an approved list of ITAR programmes, contracts and sanctioned repositories that can be loaded into `reference_programme`? Several factors depend on it.
-4. **Repository classification.** Is there an existing site inventory giving each SharePoint site a class (engineering, programme, policy, corporate, personal)? If not, it can be inferred from URL and title patterns, with lower confidence.
-5. **Teams scope.** Are Teams channel messages inside the eDiscovery scope, or only the files in the backing SharePoint sites? This changes report 6.
-6. **Where the database lives.** SQLite is right for the analysis, but the file itself will contain sensitive project metadata and needs an agreed protected location and access control.
+1. **Direct export or review set?** Which is being used today? It decides which metadata fields exist and therefore how much of the scoring framework can run at full strength.
+2. **Density denominator.** Purview gives matched counts, not totals per library or mailbox. Can a SharePoint or Graph usage report supply library item counts, or does version one rank on peak, diversity and breadth alone?
+3. **Sample export.** A real Items, Locations, Summary and Settings set from the completed "International Traffic in Arms Regulations" search would replace assumption with fact in the column map.
+4. **Reference list authorisation.** Is there an approved list of ITAR programmes, contracts and sanctioned repositories to load into `reference_programme`? Several scoring factors depend on it.
+5. **Repository classification.** Is there a site inventory classing each site as engineering, programme, policy, corporate or personal? If not it can be inferred from URL and title patterns, at lower confidence.
+6. **Teams scope.** Are channel messages inside the eDiscovery scope, or only the files in the backing sites? Private and shared channels need explicit confirmation.
+7. **Non-keyword sweep.** Is there appetite for a parallel file-type and location sweep to cover the blind spot in 7.2? Without it the exercise cannot claim coverage of technical data.
+8. **Where the database lives.** The SQLite file will hold sensitive project metadata and needs an agreed protected location and access control.
+
+---
+
+## Sources
+
+- [Document metadata fields in eDiscovery](https://learn.microsoft.com/en-us/purview/edisc-ref-document-metadata-fields)
+- [Export reference for eDiscovery](https://learn.microsoft.com/en-us/purview/edisc-ref-export)
+- [Export search results in eDiscovery](https://learn.microsoft.com/en-us/purview/edisc-search-export)
+- [Partially indexed items in eDiscovery](https://learn.microsoft.com/en-us/purview/edisc-ref-partially-indexed-items)
+- [Investigating partially indexed items in eDiscovery](https://learn.microsoft.com/en-us/purview/ediscovery-investigating-partially-indexed-items)
+- [Advanced indexing in eDiscovery](https://learn.microsoft.com/en-us/purview/edisc-ref-advanced-indexing)
+- [Finding content in Microsoft Teams in eDiscovery](https://learn.microsoft.com/en-us/purview/edisc-search-teams)
+- [eDiscovery (Premium) workflow for content in Microsoft Teams](https://learn.microsoft.com/en-us/purview/ediscovery-teams-workflow)
+- [Process reports in eDiscovery](https://learn.microsoft.com/en-us/purview/edisc-process-report)
+- [Collection statistics and reports](https://learn.microsoft.com/en-us/purview/ediscovery-collection-statistics-reports)
+- [Estimated and actual eDiscovery search results](https://learn.microsoft.com/en-us/purview/ediscovery-differences-between-estimated-and-actual-search-results)
+- [Evaluate and refine search results in eDiscovery](https://learn.microsoft.com/en-us/purview/edisc-search-results)
 
 ---
 
