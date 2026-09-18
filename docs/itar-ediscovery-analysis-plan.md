@@ -20,9 +20,9 @@ Each keyword is searched separately, so the same item appears once per keyword i
 
 1. **Land raw, then normalise.** Every CSV row is stored verbatim as JSON before any interpretation. Nothing is lost when Purview changes a column name.
 2. **One canonical record per item instance per location.** The same file copied into three sites is three records, because the deliverable is *which sites to isolate*. A separate content group ID links the copies.
-3. **Evidence is never collapsed.** The item-to-keyword link table keeps every match, with its search, its CSV file and its original row.
-4. **Every score is itemised.** No score exists without a set of factor rows explaining it.
-5. **Additive by design.** A new search inserts; it never rewrites history.
+2. **Evidence is never collapsed.** The item-to-keyword link table keeps every match, with its search, its CSV file and its original row.
+3. **Every score is itemised.** No score exists without a set of factor rows explaining it.
+4. **Additive by design.** A new search inserts; it never rewrites history.
 
 ### 1.2 Tables
 
@@ -98,9 +98,9 @@ All three are needed. Collapsing them would destroy the site-level answer the ex
 3. **Classify.** Identify file type from its header signature, not its filename, since export naming varies.
 4. **Land.** Insert every row verbatim into `raw_item_row` as JSON.
 5. **Map.** Apply `column_map` to produce canonical fields. Any unmapped header is logged as a data-quality issue and left available in `raw_json`, so no field is silently dropped.
-6. **Normalise.** Lowercase and de-parameterise URLs, strip trailing slashes, split site / library / folder path, derive folder depth, split participant lists into rows, extract domains, convert all dates to UTC ISO-8601, convert sizes to bytes, standardise label names.
-7. **Resolve location.** Upsert `location` on `location_key`.
-8. **Resolve item.** Upsert `item` on `item_key`. Existing rows update only `last_seen_run` and any previously null fields.
+5. **Normalise.** Lowercase and de-parameterise URLs, strip trailing slashes, split site / library / folder path, derive folder depth, split participant lists into rows, extract domains, convert all dates to UTC ISO-8601, convert sizes to bytes, standardise label names.
+6. **Resolve location.** Upsert `location` on `location_key`.
+7. **Resolve item.** Upsert `item` on `item_key`. Existing rows update only `last_seen_run` and any previously null fields.
 9. **Record evidence.** Insert `item_keyword_hit` rows. Never updated, only inserted.
 10. **Reconcile.** Compare loaded counts against the Locations and Summary CSVs. Mismatches raise issues; they do not fail the load.
 11. **Score.** Incremental rescoring of only the items and locations touched (section 6).
@@ -271,6 +271,27 @@ Every row in every report carries: search run, keyword, source CSV file name, or
 
 ---
 
+## 6.5 Confirmed export route: metadata only
+
+Leonardo is taking what eDiscovery produces directly from search, in metadata form only. No native files, no content. The whole design assumes this and depends on it.
+
+**What this gives.** Summary, Locations, Items and Settings CSVs per keyword search. Enough for every location-level report in section 5.
+
+**What this costs.** Fields that only populate after analytics runs in a review set stay empty: near-duplicate grouping, email threading, some family and conversation fields, and Purview's own duplicate detection. The database derives its own equivalents, as set out in 7.1, so the method still works. The derived versions are just less precise, and every one is flagged with its confidence.
+
+**The upgrade path, which keeps content out of scope.** Adding a search result to a review set and running analytics enriches the metadata. Exporting from that review set with the **Reports only** option produces the summary and metadata load file **without any native files**. So the richer fields are available without content ever leaving the tenant boundary in a document.
+
+**Recommended two-tier operating model:**
+
+| Tier | Route | Applies to | Purpose |
+|---|---|---|---|
+| 1 | Direct export from search, metadata only | Every keyword, every sweep | Broad coverage, location ranking, keyword tuning |
+| 2 | Add to review set, run analytics, export Reports only | Top-ranked locations from tier 1 | Sharper duplicate, family and threading data to confirm a location before business review |
+
+Tier 2 is optional and only ever applied to a shortlist. Tier 1 alone still produces all twelve required outputs.
+
+---
+
 ## 7. Checked against Microsoft's documentation
 
 The design above was reviewed against Microsoft Learn before being finalised. Five points changed as a result. Each one would have distorted the site ranking if left as first drafted.
@@ -333,14 +354,13 @@ Microsoft documents several legitimate reasons estimated and actual counts diffe
 
 ### Open questions
 
-1. **Direct export or review set?** Which is being used today? It decides which metadata fields exist and therefore how much of the scoring framework can run at full strength.
-2. **Density denominator.** Purview gives matched counts, not totals per library or mailbox. Can a SharePoint or Graph usage report supply library item counts, or does version one rank on peak, diversity and breadth alone?
-3. **Sample export.** A real Items, Locations, Summary and Settings set from the completed "International Traffic in Arms Regulations" search would replace assumption with fact in the column map.
-4. **Reference list authorisation.** Is there an approved list of ITAR programmes, contracts and sanctioned repositories to load into `reference_programme`? Several scoring factors depend on it.
-5. **Repository classification.** Is there a site inventory classing each site as engineering, programme, policy, corporate or personal? If not it can be inferred from URL and title patterns, at lower confidence.
-6. **Teams scope.** Are channel messages inside the eDiscovery scope, or only the files in the backing sites? Private and shared channels need explicit confirmation.
-7. **Non-keyword sweep.** Is there appetite for a parallel file-type and location sweep to cover the blind spot in 7.2? Without it the exercise cannot claim coverage of technical data.
-8. **Where the database lives.** The SQLite file will hold sensitive project metadata and needs an agreed protected location and access control.
+1. **Density denominator.** Purview gives matched counts, not totals per library or mailbox. Can a SharePoint or Graph usage report supply library item counts, or does version one rank on peak, diversity and breadth alone?
+2. **Sample export.** A real Items, Locations, Summary and Settings set from the completed "International Traffic in Arms Regulations" search would replace assumption with fact in the column map.
+3. **Reference list authorisation.** Is there an approved list of ITAR programmes, contracts and sanctioned repositories to load into `reference_programme`? Several scoring factors depend on it.
+4. **Repository classification.** Is there a site inventory classing each site as engineering, programme, policy, corporate or personal? If not it can be inferred from URL and title patterns, at lower confidence.
+5. **Teams scope.** Are channel messages inside the eDiscovery scope, or only the files in the backing sites? Private and shared channels need explicit confirmation.
+6. **Non-keyword sweep.** Is there appetite for a parallel file-type and location sweep to cover the blind spot in 7.2? Without it the exercise cannot claim coverage of technical data.
+7. **Where the database lives.** The SQLite file will hold sensitive project metadata and needs an agreed protected location and access control.
 
 ---
 
@@ -349,6 +369,7 @@ Microsoft documents several legitimate reasons estimated and actual counts diffe
 - [Document metadata fields in eDiscovery](https://learn.microsoft.com/en-us/purview/edisc-ref-document-metadata-fields)
 - [Export reference for eDiscovery](https://learn.microsoft.com/en-us/purview/edisc-ref-export)
 - [Export search results in eDiscovery](https://learn.microsoft.com/en-us/purview/edisc-search-export)
+- [Export items from a review set in eDiscovery](https://learn.microsoft.com/en-us/purview/edisc-review-set-export)
 - [Partially indexed items in eDiscovery](https://learn.microsoft.com/en-us/purview/edisc-ref-partially-indexed-items)
 - [Investigating partially indexed items in eDiscovery](https://learn.microsoft.com/en-us/purview/ediscovery-investigating-partially-indexed-items)
 - [Advanced indexing in eDiscovery](https://learn.microsoft.com/en-us/purview/edisc-ref-advanced-indexing)
