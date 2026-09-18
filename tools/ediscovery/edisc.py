@@ -1308,6 +1308,317 @@ def run_quality_checks(conn):
 
 
 # --------------------------------------------------------------------------
+# Dataverse export
+# --------------------------------------------------------------------------
+#
+# Dataverse alternate keys must not contain / < > * % & : \ ? and every
+# SharePoint URL contains several of those. So every key column written here
+# is a hex hash. URLs are carried as ordinary text columns, never as keys.
+#
+# UpsertMultiple and dataflow upserts both fail when one payload contains two
+# rows with the same key, so each file is deduplicated on its key before it is
+# written.
+
+DV_SCHEMA = [
+    # table, column, type, length, required, is_alternate_key
+    ("led_search", "led_searchkey", "Text", 64, "Yes", "Yes"),
+    ("led_search", "led_name", "Text", 200, "Yes", "No"),
+    ("led_search", "led_query", "Text", 4000, "No", "No"),
+    ("led_search", "led_searchdate", "DateOnly", "", "No", "No"),
+    ("led_search", "led_casename", "Text", 200, "No", "No"),
+
+    ("led_keyword", "led_keywordkey", "Text", 64, "Yes", "Yes"),
+    ("led_keyword", "led_name", "Text", 400, "Yes", "No"),
+    ("led_keyword", "led_categorycode", "Text", 4, "Yes", "No"),
+    ("led_keyword", "led_categoryname", "Text", 100, "No", "No"),
+    ("led_keyword", "led_specificity", "WholeNumber", "", "No", "No"),
+    ("led_keyword", "led_status", "Text", 50, "No", "No"),
+    ("led_keyword", "led_owner", "Text", 100, "No", "No"),
+    ("led_keyword", "led_note", "Text", 2000, "No", "No"),
+
+    ("led_location", "led_locationkey", "Text", 64, "Yes", "Yes"),
+    ("led_location", "led_name", "Text", 400, "Yes", "No"),
+    ("led_location", "led_workload", "Choice", "", "No", "No"),
+    ("led_location", "led_subtype", "Text", 60, "No", "No"),
+    ("led_location", "led_siteurl", "Text", 1000, "No", "No"),
+    ("led_location", "led_sitetitle", "Text", 400, "No", "No"),
+    ("led_location", "led_library", "Text", 400, "No", "No"),
+    ("led_location", "led_folderpath", "Text", 2000, "No", "No"),
+    ("led_location", "led_folderdepth", "WholeNumber", "", "No", "No"),
+    ("led_location", "led_mailbox", "Text", 320, "No", "No"),
+    ("led_location", "led_team", "Text", 200, "No", "No"),
+    ("led_location", "led_channel", "Text", 200, "No", "No"),
+    ("led_location", "led_repoclass", "Choice", "", "No", "No"),
+
+    ("led_locationscore", "led_locationscorekey", "Text", 64, "Yes", "Yes"),
+    ("led_locationscore", "led_name", "Text", 400, "Yes", "No"),
+    ("led_locationscore", "led_scopetype", "Choice", "", "Yes", "No"),
+    ("led_locationscore", "led_score", "Decimal", "", "No", "No"),
+    ("led_locationscore", "led_band", "Choice", "", "No", "No"),
+    ("led_locationscore", "led_ptspeak", "Decimal", "", "No", "No"),
+    ("led_locationscore", "led_ptsdiversity", "Decimal", "", "No", "No"),
+    ("led_locationscore", "led_ptsdensity", "Decimal", "", "No", "No"),
+    ("led_locationscore", "led_ptsbreadth", "Decimal", "", "No", "No"),
+    ("led_locationscore", "led_indicatorclasses", "Text", 200, "No", "No"),
+    ("led_locationscore", "led_rawmatches", "WholeNumber", "", "No", "No"),
+    ("led_locationscore", "led_distinctdocuments", "WholeNumber", "", "No", "No"),
+    ("led_locationscore", "led_unreadableitems", "WholeNumber", "", "No", "No"),
+    ("led_locationscore", "led_modifiers", "Text", 1000, "No", "No"),
+
+    ("led_item", "led_itemkey", "Text", 64, "Yes", "Yes"),
+    ("led_item", "led_name", "Text", 400, "Yes", "No"),
+    ("led_item", "led_locationkey", "Text", 64, "No", "No"),
+    ("led_item", "led_workload", "Choice", "", "No", "No"),
+    ("led_item", "led_siteurl", "Text", 1000, "No", "No"),
+    ("led_item", "led_mailbox", "Text", 320, "No", "No"),
+    ("led_item", "led_team", "Text", 200, "No", "No"),
+    ("led_item", "led_channel", "Text", 200, "No", "No"),
+    ("led_item", "led_library", "Text", 400, "No", "No"),
+    ("led_item", "led_folderpath", "Text", 2000, "No", "No"),
+    ("led_item", "led_repoclass", "Choice", "", "No", "No"),
+    ("led_item", "led_filename", "Text", 400, "No", "No"),
+    ("led_item", "led_fileextension", "Text", 30, "No", "No"),
+    ("led_item", "led_subject", "Text", 1000, "No", "No"),
+    ("led_item", "led_author", "Text", 200, "No", "No"),
+    ("led_item", "led_sender", "Text", 320, "No", "No"),
+    ("led_item", "led_createdon_source", "DateTime", "", "No", "No"),
+    ("led_item", "led_modifiedon_source", "DateTime", "", "No", "No"),
+    ("led_item", "led_sizebytes", "WholeNumber", "", "No", "No"),
+    ("led_item", "led_sensitivitylabel", "Text", 200, "No", "No"),
+    ("led_item", "led_retentionlabel", "Text", 200, "No", "No"),
+    ("led_item", "led_indexstatus", "Text", 200, "No", "No"),
+    ("led_item", "led_isunreadable", "YesNo", "", "No", "No"),
+    ("led_item", "led_keycconfidence", "Choice", "", "No", "No"),
+    ("led_item", "led_keywordcount", "WholeNumber", "", "No", "No"),
+    ("led_item", "led_categorycount", "WholeNumber", "", "No", "No"),
+    ("led_item", "led_categories", "Text", 100, "No", "No"),
+    ("led_item", "led_keywords", "Text", 4000, "No", "No"),
+    ("led_item", "led_score", "Decimal", "", "No", "No"),
+    ("led_item", "led_band", "Choice", "", "No", "No"),
+    ("led_item", "led_status", "Choice", "", "No", "No"),
+    ("led_item", "led_reasonforreview", "Multiline", 4000, "No", "No"),
+
+    ("led_hit", "led_hitkey", "Text", 64, "Yes", "Yes"),
+    ("led_hit", "led_name", "Text", 400, "Yes", "No"),
+    ("led_hit", "led_itemkey", "Text", 64, "Yes", "No"),
+    ("led_hit", "led_keywordkey", "Text", 64, "Yes", "No"),
+    ("led_hit", "led_searchkey", "Text", 64, "Yes", "No"),
+    ("led_hit", "led_keywordtext", "Text", 400, "No", "No"),
+    ("led_hit", "led_categorycode", "Text", 4, "No", "No"),
+    ("led_hit", "led_siteurl", "Text", 1000, "No", "No"),
+    ("led_hit", "led_mailbox", "Text", 320, "No", "No"),
+    ("led_hit", "led_sourcecsv", "Text", 260, "No", "No"),
+    ("led_hit", "led_sourcerow", "WholeNumber", "", "No", "No"),
+
+    ("led_scorefactor", "led_scorefactorkey", "Text", 64, "Yes", "Yes"),
+    ("led_scorefactor", "led_name", "Text", 200, "Yes", "No"),
+    ("led_scorefactor", "led_itemkey", "Text", 64, "Yes", "No"),
+    ("led_scorefactor", "led_factorcode", "Text", 10, "Yes", "No"),
+    ("led_scorefactor", "led_factorvalue", "Text", 400, "No", "No"),
+    ("led_scorefactor", "led_points", "Decimal", "", "No", "No"),
+    ("led_scorefactor", "led_explanation", "Text", 400, "No", "No"),
+
+    ("led_dataqualityissue", "led_issuekey", "Text", 64, "Yes", "Yes"),
+    ("led_dataqualityissue", "led_name", "Text", 200, "Yes", "No"),
+    ("led_dataqualityissue", "led_issuecode", "Text", 60, "Yes", "No"),
+    ("led_dataqualityissue", "led_severity", "Choice", "", "No", "No"),
+    ("led_dataqualityissue", "led_detail", "Multiline", 4000, "No", "No"),
+]
+
+# Tables a reviewer fills in. Created empty in Dataverse, never loaded from the
+# analysis, because the whole point is that people write to them.
+DV_REVIEW_TABLES = """
+led_reviewtask   - one per location or item sent for business review
+                   led_taskkey (alt key), led_scopetype, led_scopekey, led_assignedto (user
+                   lookup), led_duedate, led_state, led_priority
+led_reviewverdict- what the reviewer decided
+                   led_verdictkey (alt key), led_taskkey, led_verdict (choice: confirmed ITAR,
+                   not ITAR, needs specialist, cannot determine), led_reviewer, led_reviewedon,
+                   led_rationale, led_evidencenote
+led_remediation  - what was agreed, subject to authorisation
+                   led_actionkey (alt key), led_scopekey, led_proposedaction, led_approvedby,
+                   led_approvedon, led_state
+"""
+
+
+def clip(value, n):
+    if value is None:
+        return ""
+    s = str(value)
+    return s if len(s) <= n else s[: n - 1] + "\u2026"
+
+
+def dv_write(out_dir, name, header, rows, key_index=0):
+    """Write one Dataverse-ready CSV, deduplicated on its key column."""
+    path = Path(out_dir) / ("%s.csv" % name)
+    seen, written, dropped = set(), 0, 0
+    with open(path, "w", encoding="utf-8-sig", newline="") as fh:
+        wr = csv.writer(fh)
+        wr.writerow(header)
+        for row in rows:
+            k = row[key_index]
+            if not k or k in seen:
+                dropped += 1
+                continue
+            seen.add(k)
+            wr.writerow(row)
+            written += 1
+    note = "  (%d duplicate keys removed)" % dropped if dropped else ""
+    print("  %-22s %6d rows -> %s%s" % (name, written, path.name, note))
+    return written
+
+
+def export_dataverse(conn, out_dir):
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    v = SCORE_VERSION
+
+    dv_write(out, "led_search", ["led_searchkey", "led_name", "led_query", "led_searchdate", "led_casename"],
+             [(sha1s("search", r["run_name"]), clip(r["run_name"], 200), clip(r["query_text"], 4000),
+               (r["search_date"] or "")[:10], clip(r["case_name"], 200))
+              for r in conn.execute("SELECT * FROM search_run")])
+
+    dv_write(out, "led_keyword",
+             ["led_keywordkey", "led_name", "led_categorycode", "led_categoryname", "led_specificity",
+              "led_status", "led_owner", "led_note"],
+             [(sha1s("kw", r["keyword_text"]), clip(r["keyword_text"], 400), r["category_code"] or "",
+               clip(r["category_name"], 100), r["specificity"] or 0, clip(r["status"], 50),
+               clip(r["owner"], 100), clip(r["guidance_note"], 2000))
+              for r in conn.execute("SELECT k.*, c.category_name FROM keyword k "
+                                    "LEFT JOIN keyword_category c ON c.category_code = k.category_code")])
+
+    dv_write(out, "led_location",
+             ["led_locationkey", "led_name", "led_workload", "led_subtype", "led_siteurl", "led_sitetitle",
+              "led_library", "led_folderpath", "led_folderdepth", "led_mailbox", "led_team", "led_channel",
+              "led_repoclass"],
+             [(r["location_key"], clip(r["raw_location"] or r["site_url"] or r["mailbox_upn"] or "unknown", 400),
+               r["workload"] or "", clip(r["location_subtype"], 60), clip(r["site_url"], 1000),
+               clip(r["site_title"], 400), clip(r["library_name"], 400), clip(r["folder_path"], 2000),
+               r["folder_depth"] or 0, clip(r["mailbox_upn"], 320), clip(r["team_name"], 200),
+               clip(r["channel_name"], 200), r["repo_class"] or "")
+              for r in conn.execute("SELECT * FROM location")])
+
+    loc_rows = []
+    for r in conn.execute("""
+        SELECT s.score_id, s.scope_type, s.scope_ref, s.total_score, s.band,
+               (SELECT points FROM score_factor f WHERE f.score_id=s.score_id AND f.factor_code='L01') AS p1,
+               (SELECT points FROM score_factor f WHERE f.score_id=s.score_id AND f.factor_code='L02') AS p2,
+               (SELECT points FROM score_factor f WHERE f.score_id=s.score_id AND f.factor_code='L03') AS p3,
+               (SELECT points FROM score_factor f WHERE f.score_id=s.score_id AND f.factor_code='L04') AS p4,
+               (SELECT factor_value FROM score_factor f WHERE f.score_id=s.score_id AND f.factor_code='L02') AS cls,
+               (SELECT factor_value FROM score_factor f WHERE f.score_id=s.score_id AND f.factor_code='C01') AS raw,
+               (SELECT factor_value FROM score_factor f WHERE f.score_id=s.score_id AND f.factor_code='C02') AS docs,
+               (SELECT factor_value FROM score_factor f WHERE f.score_id=s.score_id AND f.factor_code='C03') AS unread,
+               (SELECT GROUP_CONCAT(factor_value || ' (' || points || ')', ' | ') FROM score_factor f
+                  WHERE f.score_id=s.score_id AND f.factor_code IN ('L05','L06','L07')) AS mods
+        FROM score s WHERE s.scope_type <> 'item' AND s.score_version = ?""", (v,)):
+        loc_rows.append((sha1s("locscore", r["scope_type"], r["scope_ref"]),
+                         clip(r["scope_ref"], 400), r["scope_type"], round(r["total_score"], 2), r["band"],
+                         round(r["p1"] or 0, 2), round(r["p2"] or 0, 2), round(r["p3"] or 0, 2),
+                         round(r["p4"] or 0, 2), clip(r["cls"], 200), parse_int(r["raw"]) or 0,
+                         parse_int(r["docs"]) or 0, parse_int(r["unread"]) or 0, clip(r["mods"], 1000)))
+    dv_write(out, "led_locationscore",
+             ["led_locationscorekey", "led_name", "led_scopetype", "led_score", "led_band", "led_ptspeak",
+              "led_ptsdiversity", "led_ptsdensity", "led_ptsbreadth", "led_indicatorclasses", "led_rawmatches",
+              "led_distinctdocuments", "led_unreadableitems", "led_modifiers"], loc_rows)
+
+    item_rows = []
+    for r in conn.execute("""
+        SELECT i.*, l.location_key, l.site_url, l.mailbox_upn, l.team_name, l.channel_name,
+               l.library_name, l.folder_path, l.repo_class,
+               sg.n_keywords, sg.n_categories, sg.categories, sg.keywords,
+               sc.total_score, sc.band, sc.status_code, sc.score_id
+        FROM item i
+        JOIN location l ON l.location_id = i.location_id
+        LEFT JOIN v_item_signals sg ON sg.item_id = i.item_id
+        LEFT JOIN score sc ON sc.scope_type='item' AND sc.scope_ref=CAST(i.item_id AS TEXT) AND sc.score_version=?""",
+        (v,)):
+        reason = conn.execute(
+            "SELECT GROUP_CONCAT(factor_code || ': ' || factor_value || ' (' || points || ')', ' | ') AS r "
+            "FROM score_factor WHERE score_id = ?", (r["score_id"],)).fetchone()["r"] if r["score_id"] else ""
+        item_rows.append((
+            r["item_key"], clip(r["file_name"] or r["title_or_subject"] or r["item_key"], 400),
+            r["location_key"], r["workload"] or "", clip(r["site_url"], 1000), clip(r["mailbox_upn"], 320),
+            clip(r["team_name"], 200), clip(r["channel_name"], 200), clip(r["library_name"], 400),
+            clip(r["folder_path"], 2000), r["repo_class"] or "", clip(r["file_name"], 400),
+            clip(r["file_extension"], 30), clip(r["title_or_subject"], 1000), clip(r["author"], 200),
+            clip(r["sender"], 320), r["created_utc"] or "", r["modified_utc"] or "", r["size_bytes"] or 0,
+            clip(r["sensitivity_label"], 200), clip(r["retention_label"], 200), clip(r["index_status"], 200),
+            "true" if r["is_unreadable"] else "false", r["key_confidence"] or "",
+            r["n_keywords"] or 0, r["n_categories"] or 0, clip(r["categories"], 100), clip(r["keywords"], 4000),
+            round(r["total_score"] or 0, 2), r["band"] or "", r["status_code"] or "", clip(reason, 4000)))
+    dv_write(out, "led_item",
+             ["led_itemkey", "led_name", "led_locationkey", "led_workload", "led_siteurl", "led_mailbox",
+              "led_team", "led_channel", "led_library", "led_folderpath", "led_repoclass", "led_filename",
+              "led_fileextension", "led_subject", "led_author", "led_sender", "led_createdon_source",
+              "led_modifiedon_source", "led_sizebytes", "led_sensitivitylabel", "led_retentionlabel",
+              "led_indexstatus", "led_isunreadable", "led_keycconfidence", "led_keywordcount",
+              "led_categorycount", "led_categories", "led_keywords", "led_score", "led_band", "led_status",
+              "led_reasonforreview"], item_rows)
+
+    hit_rows = []
+    for r in conn.execute("""
+        SELECT i.item_key, k.keyword_text, k.category_code, sr.run_name, l.site_url, l.mailbox_upn,
+               sf.file_name AS source_csv, h.raw_row_id
+        FROM item_keyword_hit h
+        JOIN item i ON i.item_id = h.item_id
+        JOIN keyword k ON k.keyword_id = h.keyword_id
+        JOIN search_run sr ON sr.search_run_id = h.search_run_id
+        JOIN location l ON l.location_id = i.location_id
+        LEFT JOIN source_file sf ON sf.source_file_id = h.source_file_id"""):
+        kk, sk = sha1s("kw", r["keyword_text"]), sha1s("search", r["run_name"])
+        hit_rows.append((sha1s("hit", r["item_key"], kk, sk),
+                         clip("%s / %s" % (r["keyword_text"], r["run_name"]), 400),
+                         r["item_key"], kk, sk, clip(r["keyword_text"], 400), r["category_code"] or "",
+                         clip(r["site_url"], 1000), clip(r["mailbox_upn"], 320),
+                         clip(r["source_csv"], 260), r["raw_row_id"] or 0))
+    dv_write(out, "led_hit",
+             ["led_hitkey", "led_name", "led_itemkey", "led_keywordkey", "led_searchkey", "led_keywordtext",
+              "led_categorycode", "led_siteurl", "led_mailbox", "led_sourcecsv", "led_sourcerow"], hit_rows)
+
+    fac_rows = []
+    for r in conn.execute("""
+        SELECT i.item_key, f.factor_code, f.factor_value, f.points, f.note
+        FROM score_factor f JOIN score s ON s.score_id = f.score_id
+        JOIN item i ON CAST(i.item_id AS TEXT) = s.scope_ref
+        WHERE s.scope_type = 'item' AND s.score_version = ?""", (v,)):
+        fac_rows.append((sha1s("fac", r["item_key"], r["factor_code"], r["factor_value"]),
+                         clip("%s %s" % (r["factor_code"], r["factor_value"]), 200), r["item_key"],
+                         r["factor_code"], clip(r["factor_value"], 400), r["points"], clip(r["note"], 400)))
+    dv_write(out, "led_scorefactor",
+             ["led_scorefactorkey", "led_name", "led_itemkey", "led_factorcode", "led_factorvalue",
+              "led_points", "led_explanation"], fac_rows)
+
+    dv_write(out, "led_dataqualityissue",
+             ["led_issuekey", "led_name", "led_issuecode", "led_severity", "led_detail"],
+             [(sha1s("dq", r["issue_code"], r["scope_ref"], r["detail"]),
+               clip("%s %s" % (r["issue_code"], r["scope_ref"]), 200), r["issue_code"],
+               r["severity"], clip(r["detail"], 4000))
+              for r in conn.execute("SELECT * FROM data_quality_issue")])
+
+    with open(out / "_dataverse_schema.csv", "w", encoding="utf-8-sig", newline="") as fh:
+        wr = csv.writer(fh)
+        wr.writerow(["table", "column", "type", "max_length", "required", "alternate_key"])
+        for row in DV_SCHEMA:
+            wr.writerow(row)
+    print("  %-22s %6d rows -> _dataverse_schema.csv" % ("(table definitions)", len(DV_SCHEMA)))
+
+    with open(out / "_review_tables.txt", "w", encoding="utf-8") as fh:
+        fh.write("Tables to create empty in Dataverse. Reviewers write to these, the loader never does.\n")
+        fh.write(DV_REVIEW_TABLES)
+
+    print("\nEvery key column is a hex hash, because Dataverse alternate keys reject / : ? & and")
+    print("every SharePoint URL contains them. URLs are carried as ordinary text columns.")
+
+
+def cmd_dataverse(args):
+    conn = connect(args.db)
+    print("Dataverse export")
+    export_dataverse(conn, args.out)
+    print("\nFiles written to: %s" % args.out)
+
+
+# --------------------------------------------------------------------------
 # inspect and selftest
 # --------------------------------------------------------------------------
 
@@ -1468,6 +1779,25 @@ def cmd_selftest(args):
         unread = conn.execute("SELECT COUNT(*) c FROM item WHERE is_unreadable=1").fetchone()["c"]
         assert unread >= 2, "unreadable items should be detected, got %d" % unread
 
+        dv = tmp / "dataverse"
+        print("\nDataverse export")
+        export_dataverse(conn, dv)
+        bad = re.compile(r"[/<>*%&:\\?]")
+        for f in sorted(dv.glob("led_*.csv")):
+            with open(f, encoding="utf-8-sig", newline="") as fh:
+                rdr = csv.reader(fh)
+                header = next(rdr)
+                keycols = [i for i, h in enumerate(header) if h.endswith("key")]
+                seen = set()
+                for row in rdr:
+                    k = row[0]
+                    assert k not in seen, "%s has a duplicate key, upsert would fail" % f.name
+                    seen.add(k)
+                    for i in keycols:
+                        assert not bad.search(row[i]), \
+                            "%s column %s holds a character Dataverse keys reject: %r" % (f.name, header[i], row[i])
+        assert (dv / "_dataverse_schema.csv").exists(), "table definitions not written"
+
         print("\nSELFTEST PASSED")
         print("  items: %d   keyword hits: %d   unreadable: %d" % (items, hits, unread))
         if args.keep:
@@ -1512,6 +1842,10 @@ def cmd_all(args):
     cmd_load(args)
     cmd_score(args)
     cmd_report(args)
+    if getattr(args, "dataverse_out", None):
+        conn = connect(args.db)
+        print("\nDataverse export")
+        export_dataverse(conn, args.dataverse_out)
 
 
 def main():
@@ -1530,6 +1864,8 @@ def main():
         p.add_argument("--config", default="config.json")
         if needs_out:
             p.add_argument("--out", default="reports")
+            p.add_argument("--dataverse-out", dest="dataverse_out", default=None,
+                           help="also write Dataverse-ready CSVs to this folder")
         p.set_defaults(func=fn)
 
     p = sub.add_parser("score")
@@ -1542,6 +1878,11 @@ def main():
     p.add_argument("--out", default="reports")
     p.add_argument("--config", default="config.json")
     p.set_defaults(func=cmd_report)
+
+    p = sub.add_parser("dataverse", help="write Dataverse-ready CSVs and the table definitions")
+    p.add_argument("--db", required=True)
+    p.add_argument("--out", default="dataverse")
+    p.set_defaults(func=cmd_dataverse)
 
     p = sub.add_parser("selftest", help="run the whole pipeline on invented data and check the result")
     p.add_argument("--keep", action="store_true")

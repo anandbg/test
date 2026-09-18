@@ -139,3 +139,19 @@ This builds invented data, runs the whole pipeline, and checks that an engineeri
 - Counts will not tie back exactly to Purview. That is expected, and the reasons are recorded in the data quality report.
 - The database holds sensitive project metadata, including email subjects and recipients. Keep it somewhere protected and agree who may open it.
 - Nothing here is a Trade Compliance or legal determination. It prioritises what people should look at, nothing more.
+
+---
+
+## 7. Sending it to Dataverse
+
+```
+python edisc.py dataverse --db itar.db --out dataverse_load
+```
+
+This writes one CSV per Dataverse table, plus `_dataverse_schema.csv` listing every column, its type and its length, and `_review_tables.txt` describing the tables reviewers write to.
+
+Every key column is a hex hash. Dataverse alternate keys reject the characters `/ : ? & % * < > \`, and every SharePoint URL contains several of them. URLs are carried as ordinary text columns instead. Each file is also deduplicated on its key, because an upsert fails if one batch contains the same key twice.
+
+Load the files in this order so that lookups have something to point at: search, keyword, location, locationscore, item, hit, scorefactor, dataqualityissue.
+
+Full guidance, including capacity, elastic tables and the reviewer app, is in `docs/dataverse-loading-and-analysis.md`.
