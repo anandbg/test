@@ -1,0 +1,23 @@
+run_name,keyword,category,specificity,owner,note
+search_itar_phrase,International Traffic in Arms Regulations,A,3,Trade Compliance,Seed term. Catches reference material as well as real obligations.
+search_itar_acronym,ITAR,A,2,Trade Compliance,Broad. Expect training and policy noise.
+search_usml,United States Munitions List,A,3,Trade Compliance,
+search_ddtc,DDTC,A,3,Trade Compliance,
+search_taa,Technical Assistance Agreement,A,3,Trade Compliance,
+search_export_controlled,Export Controlled,B,3,Trade Compliance,Handling marking. Strong signal in a file name.
+search_noforn,NOFORN,B,3,Trade Compliance,
+search_us_persons,US Persons Only,B,3,Trade Compliance,
+search_dist_statement,Distribution Statement,B,3,Trade Compliance,
+search_programme_falcon,REPLACE WITH PROGRAMME NAME,C,3,Programme Office,One row per programme or contract. Supplied by the business.
+search_contract_number,REPLACE WITH CONTRACT NUMBER,C,3,Contracts,
+search_icd,Interface Control Document,D,3,Engineering,
+search_tdp,Technical Data Package,D,3,Engineering,
+search_drawing,drawing number,D,2,Engineering,
+search_dual_national,dual national,E,2,HR and Security,
+search_nationality_check,nationality check,E,2,HR and Security,
+search_itar_training,ITAR training,F,2,Trade Compliance,Deliberately negative. Marks reference material.
+search_export_policy,export control policy,F,2,Trade Compliance,Deliberately negative.
+search_sweep_dwg,FileExtension:dwg,X,3,Analyst,File type sweep. No keyword. See appendix A of the method.
+search_sweep_step,FileExtension:step OR FileExtension:stp,X,3,Analyst,File type sweep.
+search_sweep_catia,FileExtension:catpart OR FileExtension:catproduct,X,3,Analyst,File type sweep.
+search_sweep_solidworks,FileExtension:sldprt OR FileExtension:slddrw OR FileExtension:sldasm,X,3,Analyst,File type sweep.

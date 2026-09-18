@@ -1,0 +1,37 @@
+{
+  "_comment": "Copy to config.json and edit. Anything left out falls back to the built-in default.",
+
+  "internal_domains": ["leonardo.com", "leonardocompany.com"],
+
+  "repo_class_rules": [
+    {"match": "/personal/", "class": "personal"},
+    {"match": "(policy|policies|hr\\b|quality|bms|businessmanagement|intranet|comms|training|induction|handbook)", "class": "policy"},
+    {"match": "(engineer|\\beng[-_]|design|\\bcad\\b|drawing|technical|\\btech[-_]|r&d|rnd|\\blab[-_]|test)", "class": "engineering"},
+    {"match": "(programme|program|\\bprog[-_]|project|\\bproj[-_]|bid|tender|contract|campaign)", "class": "programme"}
+  ],
+
+  "programme_patterns": [
+    "\\b[A-Z]{2,5}-\\d{3,6}\\b",
+    "\\b\\d{3}-\\d{4,6}(?:-\\d+)?\\b",
+    "\\bP/?N[ :-]?\\s*[A-Z0-9-]{4,}\\b"
+  ],
+
+  "weights": {
+    "F01_category_diversity": 4,
+    "F01_cap": 12,
+    "F02_specificity_3": 5,
+    "F03_marking_in_name": 6,
+    "F04_technical_type": 5,
+    "F05_programme_pattern": 5,
+    "F06_engineering_repo": 3,
+    "F07_known_itar_repo": -4,
+    "F08_unexpected_location": 4,
+    "F09_missing_label": 3,
+    "F11_external_recipient": 4,
+    "F12_procedural_only": -6,
+    "F13_widely_duplicated": 2,
+    "F14_recent": 1
+  },
+
+  "location_weights": {"peak": 0.35, "diversity": 0.25, "density": 0.20, "breadth": 0.20}
+}
