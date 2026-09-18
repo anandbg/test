@@ -379,6 +379,51 @@ Microsoft documents several legitimate reasons estimated and actual counts diffe
 - [Collection statistics and reports](https://learn.microsoft.com/en-us/purview/ediscovery-collection-statistics-reports)
 - [Estimated and actual eDiscovery search results](https://learn.microsoft.com/en-us/purview/ediscovery-differences-between-estimated-and-actual-search-results)
 - [Evaluate and refine search results in eDiscovery](https://learn.microsoft.com/en-us/purview/edisc-search-results)
+- [Keyword queries and search conditions for eDiscovery](https://learn.microsoft.com/en-us/purview/ediscovery-keyword-queries-and-search-conditions)
+- [Use Keyword Query Language to create search queries in eDiscovery](https://learn.microsoft.com/en-us/purview/edisc-keyword-query-language)
+
+---
+
+## Appendix A. The file-type sweep, and why keyword search alone is not enough
+
+### The problem in plain terms
+
+Keyword search reads the words inside a file. A great deal of ITAR technical data has no readable words inside it:
+
+- A CAD model is geometry, not text.
+- A scanned drawing is a picture of a drawing.
+- A password-protected archive cannot be opened at all.
+- An oversized technical data package is skipped.
+
+None of these will ever match "ITAR", or any other term, no matter how good the keyword list is. A site holding nothing but engineering drawings returns zero hits and looks clean. It is not clean. It is invisible to this method.
+
+That is why keyword results alone cannot support a statement about coverage of technical data. They support a statement about coverage of *documents that talk about* technical data.
+
+### The fix, which needs no new tool
+
+Stop asking "which files mention export control" and start asking "which places hold engineering material at all". Microsoft supports `FileExtension` as a searchable property in eDiscovery KeyQL, with wildcards. The file name and extension are indexed even when the content inside is not, so this reaches files that keyword search cannot.
+
+**Sweep design:**
+
+1. Run a second family of searches carrying **no keyword at all**, only file type. For example `FileExtension:dwg OR FileExtension:step OR FileExtension:stp OR FileExtension:catpart OR FileExtension:slddrw OR FileExtension:prt OR FileExtension:igs`.
+2. Group them into classes: CAD and drawing, simulation and analysis, source code and firmware, technical publication, archive and container.
+3. Export the Locations CSV exactly as for the keyword searches. Load into the same database with a keyword category of its own, so the plumbing does not change.
+4. Rank locations by **engineering material density**, entirely separately from keyword hits.
+
+### How the two views combine
+
+The site report gains a second axis. Keyword evidence on one, engineering material on the other:
+
+| | Few engineering files | Many engineering files |
+|---|---|---|
+| **Many keyword hits** | Likely a policy or reference site. Deprioritise, do not exclude | Highest priority. Talks about control and holds the material |
+| **Few or no keyword hits** | Low interest | **The blind spot.** Holds the material, says nothing about it. Invisible to keyword search alone |
+
+The bottom-right cell is the whole point. Those locations cannot be found any other way, and on a first-principles view of ITAR risk they may matter more than a site full of policy documents.
+
+### What it still cannot do
+
+A file-type sweep finds *containers of technical material*. It does not say whether any given drawing is ITAR-controlled. That remains a business owner and Trade Compliance judgement, as everywhere else in this method.
 
 ---
 
